@@ -77,10 +77,69 @@
 
 ## In Progress / Planned
 
-### Phase 6: Linear Integration — The Bridge
-_Connect planner output to orchestrator input via Linear issues._
+### Phase 5b: Missing Planner Features (gaps from scrum-jira-agent port)
+_Functionality that existed in scrum-jira-agent but was lost or left incomplete during the port._
 
-- [ ] Add Linear create mutations to `linear_client.py`:
+**Critical:**
+- [ ] **Session persistence** — Replace in-memory session storage with SQLite + LangGraph checkpointing
+  - Port `persistence.py` (28KB) and `sessions.py` (25KB) from scrum-jira-agent
+  - Wire into planner API routes (currently has `# TODO: replace with persistent storage`)
+  - Sessions survive server restarts and crashes
+- [ ] **Session resume** — Resume a previous planning session from where it left off
+  - `GET /api/planner/sessions` returns saved sessions from DB
+  - `POST /api/planner/sessions/{id}/message` picks up mid-pipeline
+- [ ] **Wire up CLI export** — `maestro export` is a stub; connect it to the existing `exporters/html.py`
+- [ ] **Questionnaire import/export** — Port `questionnaire_io.py` for offline planning
+  - `POST /api/planner/sessions/{id}/import-questionnaire` (upload Markdown)
+  - `GET /api/planner/questionnaire-template` (download blank template)
+  - CLI: `maestro import-questionnaire <file>` and `maestro export-questionnaire`
+
+**Nice-to-have:**
+- [ ] **Dry-run mode** — Run the full pipeline with fake delays and no LLM calls (for demos/testing)
+  - API: `POST /api/planner/sessions` with `{"dry_run": true}`
+  - CLI: `maestro serve --dry-run`
+- [ ] **Auto-accept mode** — Skip all review gates and generate a full plan end-to-end
+  - API: `POST /api/planner/sessions` with `{"auto_accept": true}`
+  - Useful for batch/scripted planning runs
+- [ ] **Quick intake mode** — 17 essential questions instead of the full 26
+  - API: `POST /api/planner/sessions` with `{"intake_mode": "quick"}`
+- [ ] **Setup wizard** — First-run guided API key validation in web UI
+  - Check for required env vars on startup, show setup page if missing
+
+### Phase 5c: Test Gaps
+_Tests that existed in scrum-jira-agent but weren't ported._
+
+- [ ] **Integration tests** (~330KB across 10 files):
+  - CLI end-to-end tests
+  - Full pipeline graph runs
+  - Graph topology validation
+  - Multi-node flow tests
+  - ReAct loop tests
+- [ ] **Contract tests** (6 files) — Recorded API response tests:
+  - Jira, GitHub, Azure DevOps, Confluence, LLM provider contracts
+  - Schema validation tests
+- [ ] **Golden dataset evaluators** (3 files) — Deterministic LLM output quality checks
+- [ ] **Token budget regression** — `test_token_budgets.py` catches prompt size inflation in CI
+- [ ] **Planner API integration tests** — New tests for the web API layer (sessions, messages, review, export)
+- [ ] **WebSocket integration tests** — Test real-time event streaming during pipeline execution
+
+### Phase 6: Tracker Abstraction + The Bridge
+_Make the orchestrator tracker-agnostic so it works with Linear, Jira, GitHub Issues, or Azure DevOps — not just Linear._
+
+- [ ] Define `Tracker` protocol/ABC (`runner/tracker.py`):
+  - `poll_issues(state) → list[Issue]`
+  - `move_issue(issue_id, from_state, to_state)`
+  - `post_comment(issue_id, body)`
+  - `fetch_issue(issue_id) → Issue`
+  - `create_issue(title, description, parent_id, labels, ...) → issue_id`
+- [ ] Refactor `linear_client.py` → implement `LinearTracker(Tracker)`
+- [ ] Create `JiraTracker(Tracker)` — wraps existing Jira tools (jira.py) for orchestrator use
+- [ ] Create `GitHubTracker(Tracker)` — poll GitHub Issues, post comments, move via labels/projects
+- [ ] Create `AzDoTracker(Tracker)` — poll Azure DevOps work items, move via states
+- [ ] Update `workflow_config.py` — `tracker.kind` selects which implementation (`linear`, `jira`, `github`, `azdo`)
+- [ ] Update orchestrator to use `Tracker` interface instead of calling `LinearClient` directly
+- [ ] Planner export uses the same abstraction — export to whichever tracker is configured
+- [ ] Add Linear create mutations to `LinearTracker`:
   - `create_issue(title, description, team_id, state_id, priority, label_ids, parent_id)`
   - `create_label(name, team_id)`
   - `fetch_teams()` and `fetch_states(team_id)`
@@ -127,6 +186,35 @@ _Connect planner output to orchestrator input via Linear issues._
 - [ ] Integrate with orchestrator dispatch (pause when limits approached)
 - [ ] WebSocket broadcast for live token updates
 - [ ] Token sparkline data endpoint for dashboard charts
+
+### Phase 10b: Bidirectional Tracker Sync
+_Keep two trackers in sync — e.g. Jira as the team's source of truth, Linear as the agent execution layer._
+
+- [ ] Webhook receivers for each tracker:
+  - `POST /api/webhooks/jira` — Jira webhook (issue updated, status changed, comment added)
+  - `POST /api/webhooks/linear` — Linear webhook (issue updated, state changed, comment added)
+  - `POST /api/webhooks/github` — GitHub webhook (issue/project events)
+  - `POST /api/webhooks/azdo` — Azure DevOps Service Hooks (work item updated, state changed, comment added)
+- [ ] `SyncEngine` — maps events between trackers:
+  - Field mapping config: which fields sync (status, assignee, labels, comments, priority)
+  - State mapping: e.g. Jira "In Progress" ↔ Linear "In Progress" (configurable per project)
+  - Conflict resolution: last-write-wins with configurable priority (e.g. "Jira wins on status, Linear wins on agent comments")
+  - Deduplication: idempotency keys to prevent infinite sync loops
+- [ ] Extend `workflow_config.py` with `sync` section:
+  ```yaml
+  sync:
+    primary: jira          # source of truth for human changes
+    agent_tracker: linear  # where orchestrator runs agents
+    field_map:
+      status: bidirectional
+      comments: bidirectional
+      priority: primary_to_agent
+      labels: primary_to_agent
+  ```
+- [ ] Mirror planner exports: create in primary tracker, auto-create in agent tracker
+- [ ] Sync agent completion back: orchestrator marks "Done" in Linear → status synced to Jira
+- [ ] Comment mirroring: agent progress comments on Linear appear on the Jira ticket
+- [ ] Dashboard view showing sync status and any conflicts
 
 ### Phase 11: Polish + Testing
 - [ ] Comprehensive orchestrator unit tests

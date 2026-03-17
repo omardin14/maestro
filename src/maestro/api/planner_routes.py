@@ -185,6 +185,26 @@ async def _invoke_graph(graph, input_state: dict, config: dict, session_id: str)
 def _serialize_state(state: dict) -> dict:
     """Convert graph state to JSON-serializable dict."""
     import dataclasses
+    import enum
+
+    def _convert(obj: Any) -> Any:
+        if obj is None or isinstance(obj, (str, int, float, bool)):
+            return obj
+        if isinstance(obj, enum.Enum):
+            return obj.value
+        if isinstance(obj, (set, frozenset)):
+            return [_convert(item) for item in obj]
+        if isinstance(obj, tuple):
+            return [_convert(item) for item in obj]
+        if isinstance(obj, dict):
+            return {str(k): _convert(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_convert(item) for item in obj]
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+            return _convert(dataclasses.asdict(obj))
+        if hasattr(obj, "content"):  # LangChain message objects
+            return {"type": type(obj).__name__, "content": obj.content}
+        return str(obj)
 
     result = {}
     for key, value in state.items():
@@ -192,21 +212,6 @@ def _serialize_state(state: dict) -> dict:
             result["messages"] = [
                 {"type": type(m).__name__, "content": getattr(m, "content", str(m))} for m in (value or [])
             ]
-        elif key == "questionnaire":
-            if value and dataclasses.is_dataclass(value):
-                result["questionnaire"] = dataclasses.asdict(value)
-            else:
-                result["questionnaire"] = value
-        elif key == "project_analysis":
-            if value and dataclasses.is_dataclass(value):
-                d = dataclasses.asdict(value)
-                result["project_analysis"] = d
-            else:
-                result["project_analysis"] = value
-        elif isinstance(value, list) and value and dataclasses.is_dataclass(value[0]):
-            result[key] = [dataclasses.asdict(item) for item in value]
-        elif hasattr(value, "value"):  # Enum
-            result[key] = value.value
         else:
-            result[key] = value
+            result[key] = _convert(value)
     return result

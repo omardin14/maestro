@@ -19,7 +19,7 @@ interface UseWebSocketOptions {
 export function useWebSocket({ url, onMessage, reconnect = true, reconnectInterval = 3000 }: UseWebSocketOptions) {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';

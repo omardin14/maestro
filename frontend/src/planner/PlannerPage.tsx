@@ -80,10 +80,6 @@ export function PlannerPage() {
 
   // Determine current stage
   const hasAnalysis = !!state.project_analysis;
-  const hasEpics = (state.epics?.length ?? 0) > 0;
-  const hasStories = (state.stories?.length ?? 0) > 0;
-  const hasTasks = (state.tasks?.length ?? 0) > 0;
-  const hasSprints = (state.sprints?.length ?? 0) > 0;
 
   if (!sessionId) {
     return (
